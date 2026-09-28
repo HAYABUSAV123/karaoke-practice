@@ -32,7 +32,8 @@
             <button id="leftMuteButton">🔊 左：音あり</button>
             <button id="rightMuteButton">🔊 右：音あり</button>
             <button id="linkButton">連動：ON</button>
-            <button id="waveLockButton">🔓 波形：操作OK</button>
+            <button id="leftWaveLockButton">🔓 左波形：操作OK</button>
+            <button id="rightWaveLockButton">🔓 右波形：操作OK</button>
         </div>
     </div>
 
@@ -76,6 +77,12 @@
             <input type="number" id="volumeStep" value="0.1" min="0.01" max="1" step="0.1">
         </label>
 
+        <label>
+            波形表示幅
+            <input type="number" id="waveWindow" value="5" min="0.5" max="120" step="0.5">
+            秒
+        </label>
+
         <hr>
 
         <div class="volume-control">
@@ -111,7 +118,7 @@
     <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
     <script>eruda.init();</script>
 
-    <script src="script.js?v=4"></script>
+    <script src="script.js?v=5"></script>
 </div>
 </body>
 </html>

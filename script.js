@@ -49,12 +49,13 @@ const playButton = $("playButton"), stopButton = $("stopButton"), syncButton = $
 const backButton = $("backButton"), forwardButton = $("forwardButton");
 const timeDisplay = $("timeDisplay");
 const linkButton = $("linkButton");
-const waveLockButton = $("waveLockButton");
+const leftWaveLockButton = $("leftWaveLockButton");
+const rightWaveLockButton = $("rightWaveLockButton");
 const leftMuteButton = $("leftMuteButton"), rightMuteButton = $("rightMuteButton");
 const loopSettingsButton = $("loopSettingsButton"), loopControls = $("loopControls");
 const loopPlayButton = $("loopPlayButton"), pinInfo = $("pinInfo");
 const settingsButton = $("settingsButton");
-const skipTime = $("skipTime"), volumeStep = $("volumeStep"), playbackRate = $("playbackRate");
+const skipTime = $("skipTime"), volumeStep = $("volumeStep"), playbackRate = $("playbackRate"), waveWindow = $("waveWindow");
 const leftVolume = $("leftVolume"), rightVolume = $("rightVolume");
  
  
@@ -63,8 +64,11 @@ let isPlaying = false;
 let loopMode = false;      // 周回ループ中か
 let loopOpen = false;      // ループ設定を開いているか
 let linked = true;         // 連動ON（片方を動かすともう片方も同じ分だけ動く）
-let waveLocked = localStorage.getItem("waveLocked") === "true";
-const WAVE_WINDOW_SECONDS = 20;
+let leftWaveLocked = localStorage.getItem("leftWaveLocked") === "true";
+let rightWaveLocked = localStorage.getItem("rightWaveLocked") === "true";
+let waveWindowSeconds = Number(localStorage.getItem("waveWindowSeconds") ?? 5);
+if (!Number.isFinite(waveWindowSeconds)) waveWindowSeconds = 5;
+waveWindowSeconds = Math.min(120, Math.max(0.5, waveWindowSeconds));
 const PLAYHEAD_RATIO = 0.5;
 let sources = [];          // 今鳴らしている音のノード
 let startedAt = 0;         // 通常再生を始めた時刻
@@ -196,7 +200,8 @@ function updateButtons() {
     playButton.textContent = (isPlaying && !loopMode) ? "⏸ 一時停止" : "▶ 再生";
     loopPlayButton.textContent = (isPlaying && loopMode) ? "■ 再生停止！" : "▶ 再生開始！";
     linkButton.textContent = linked ? "連動：ON" : "連動：OFF";
-    waveLockButton.textContent = waveLocked ? "🔒 波形：ロック中" : "🔓 波形：操作OK";
+    leftWaveLockButton.textContent = leftWaveLocked ? "🔒 左波形：ロック中" : "🔓 左波形：操作OK";
+    rightWaveLockButton.textContent = rightWaveLocked ? "🔒 右波形：ロック中" : "🔓 右波形：操作OK";
     for (const t of tracks) {
         const b = t === left ? leftMuteButton : rightMuteButton;
         b.textContent = t.muted ? `🔇 ${t.name}：ミュート中` : `🔊 ${t.name}：音あり`;
@@ -278,9 +283,15 @@ linkButton.addEventListener("click", function() {
     updateButtons();
 });
 
-waveLockButton.addEventListener("click", function() {
-    waveLocked = !waveLocked;
-    localStorage.setItem("waveLocked", waveLocked);
+leftWaveLockButton.addEventListener("click", function() {
+    leftWaveLocked = !leftWaveLocked;
+    localStorage.setItem("leftWaveLocked", leftWaveLocked);
+    updateButtons();
+});
+
+rightWaveLockButton.addEventListener("click", function() {
+    rightWaveLocked = !rightWaveLocked;
+    localStorage.setItem("rightWaveLocked", rightWaveLocked);
     updateButtons();
 });
  
@@ -349,12 +360,12 @@ function getWaveView(t, total) {
     const duration = dur(t);
     if (!duration || !total) return { start: 0, end: duration || 0 };
 
-    const windowSize = Math.min(WAVE_WINDOW_SECONDS, duration);
+    // 赤い再生ラインを常に画面中央に固定し、波形を左右へ流す。
+    // 音源の前後は空白として表示することで、開始/終了付近でも中央固定を維持。
+    const windowSize = waveWindowSeconds;
     const pos = Math.min(duration, Math.max(0, getPos(t)));
-
-    let start = pos - windowSize * PLAYHEAD_RATIO;
-    start = Math.max(0, Math.min(start, duration - windowSize));
-    return { start, end: start + windowSize };
+    const half = windowSize * PLAYHEAD_RATIO;
+    return { start: pos - half, end: pos + (windowSize - half) };
 }
 
 function drawPin(c, sec, viewStart, viewEnd, w, h, color) {
@@ -397,13 +408,16 @@ function drawWave(t, total) {
     const viewSpan = Math.max(0.001, view.end - view.start);
     const mid = h / 2;
 
-    // 横軸を約20秒に拡大し、再生中は波形が右→左へ流れる
     c.fillStyle = "#4a90d9";
     for (let x = 0; x < w; x++) {
-        const t0 = Math.max(0, view.start + x / w * viewSpan);
-        const t1 = Math.min(duration, view.start + (x + 1) / w * viewSpan);
-        const i0 = Math.max(0, Math.floor(t0 / duration * PEAK_BINS));
-        const i1 = Math.min(PEAK_BINS, Math.max(i0 + 1, Math.ceil(t1 / duration * PEAK_BINS)));
+        const t0 = view.start + x / w * viewSpan;
+        const t1 = view.start + (x + 1) / w * viewSpan;
+        if (t1 <= 0 || t0 >= duration) continue;
+
+        const visibleT0 = Math.max(0, t0);
+        const visibleT1 = Math.min(duration, t1);
+        const i0 = Math.max(0, Math.floor(visibleT0 / duration * PEAK_BINS));
+        const i1 = Math.min(PEAK_BINS, Math.max(i0 + 1, Math.ceil(visibleT1 / duration * PEAK_BINS)));
 
         let p = 0;
         for (let i = i0; i < i1; i++) {
@@ -429,16 +443,17 @@ function drawWave(t, total) {
         drawPin(c, t.pinEnd, view.start, view.end, w, h, "#ef6c00");
     }
 
-    // 再生位置の赤い線。中央付近を基準に波形が流れる
-    const posX = Math.max(0, Math.min(w, timeToX(getPos(t), view.start, view.end, w)));
+    // 赤い再生位置は常に枠の中央に固定
+    const playheadX = w * PLAYHEAD_RATIO;
     c.fillStyle = "#e53935";
-    c.fillRect(posX - 1, 0, 2, h);
+    c.fillRect(playheadX - 1, 0, 2, h);
 }
 
 // 波形のタップ・ドラッグ
 function setupWave(t) {
     const canvas = t.canvas;
     let drag = null;
+    const getLocked = () => t === left ? leftWaveLocked : rightWaveLocked;
 
     const toTime = e => {
         const r = canvas.getBoundingClientRect();
@@ -447,19 +462,21 @@ function setupWave(t) {
         return clampTime(t, view.start + ratio * (view.end - view.start));
     };
 
-    // 自分を time に動かす。連動ONなら、もう片方も同じ分だけ動かす
-    const moveTo = time => {
-        const delta = time - t.offset;
+    // ドラッグ開始位置を基準に波形を動かす。赤線は中央に固定。
+    const moveByPixels = (startX, currentX, startTime, viewSpan, width) => {
+        const delta = (currentX - startX) / width * viewSpan;
+        const time = clampTime(t, startTime - delta);
+        const actualDelta = time - t.offset;
         t.offset = time;
         if (linked) {
             for (const o of tracks) {
-                if (o !== t && o.buffer) o.offset = clampTime(o, o.offset + delta);
+                if (o !== t && o.buffer) o.offset = clampTime(o, o.offset + actualDelta);
             }
         }
     };
 
     canvas.addEventListener("pointerdown", function(e) {
-        if (!t.buffer || waveLocked) return;
+        if (!t.buffer || getLocked()) return;
         const r = canvas.getBoundingClientRect();
         const x = e.clientX - r.left;
         const total = totalDuration();
@@ -479,26 +496,34 @@ function setupWave(t) {
             drag = { key: key };
         } else {
             if (loopMode) return;
-            drag = { key: null, wasPlaying: isPlaying };
+            drag = {
+                key: null,
+                wasPlaying: isPlaying,
+                startX: x,
+                startTime: getPos(t),
+                viewSpan: view.end - view.start,
+                width: r.width
+            };
             if (isPlaying) pauseAll();
-            moveTo(toTime(e));
         }
         canvas.setPointerCapture(e.pointerId);
     });
 
     canvas.addEventListener("pointermove", function(e) {
-        if (!drag || waveLocked) return;
+        if (!drag || getLocked()) return;
         if (drag.key) {
             t[drag.key] = toTime(e);
             updatePinInfo();
         } else {
-            moveTo(toTime(e));
+            const r = canvas.getBoundingClientRect();
+            const x = e.clientX - r.left;
+            moveByPixels(drag.startX, x, drag.startTime, drag.viewSpan, r.width);
         }
     });
 
     const end = function() {
         if (!drag) return;
-        if (!drag.key && drag.wasPlaying && !waveLocked) {
+        if (!drag.key && drag.wasPlaying && !getLocked()) {
             startNormal();
             updateButtons();
         }
@@ -625,6 +650,7 @@ volumeStep.value = localStorage.getItem("volumeStep") ?? 0.1;
 leftVolume.value = localStorage.getItem("leftVolume") ?? 1;
 rightVolume.value = localStorage.getItem("rightVolume") ?? 1;
 playbackRate.value = localStorage.getItem("playbackRate") ?? 1;
+waveWindow.value = String(waveWindowSeconds);
  
 skipTime.addEventListener("change", function() {
     localStorage.setItem("skipTime", skipTime.value);
@@ -633,6 +659,17 @@ skipTime.addEventListener("change", function() {
  
 volumeStep.addEventListener("change", function() {
     localStorage.setItem("volumeStep", volumeStep.value);
+});
+
+waveWindow.addEventListener("change", function() {
+    let value = Number(waveWindow.value);
+    if (!Number.isFinite(value)) value = 5;
+    value = Math.min(120, Math.max(0.5, value));
+    value = Math.round(value * 10) / 10;
+    waveWindow.value = String(value);
+    waveWindowSeconds = value;
+    localStorage.setItem("waveWindowSeconds", value);
+    updateUI();
 });
  
  

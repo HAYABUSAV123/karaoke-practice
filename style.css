@@ -337,6 +337,7 @@ button, input, select {
     width: 100%;
 }
 
-#waveLockButton {
-    grid-column: 1 / 3;
+#leftWaveLockButton,
+#rightWaveLockButton {
+    width: 100%;
 }
