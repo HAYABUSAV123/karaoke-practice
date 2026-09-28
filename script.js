@@ -49,6 +49,7 @@ const playButton = $("playButton"), stopButton = $("stopButton"), syncButton = $
 const backButton = $("backButton"), forwardButton = $("forwardButton");
 const timeDisplay = $("timeDisplay");
 const linkButton = $("linkButton");
+const waveLockButton = $("waveLockButton");
 const leftMuteButton = $("leftMuteButton"), rightMuteButton = $("rightMuteButton");
 const loopSettingsButton = $("loopSettingsButton"), loopControls = $("loopControls");
 const loopPlayButton = $("loopPlayButton"), pinInfo = $("pinInfo");
@@ -62,6 +63,9 @@ let isPlaying = false;
 let loopMode = false;      // 周回ループ中か
 let loopOpen = false;      // ループ設定を開いているか
 let linked = true;         // 連動ON（片方を動かすともう片方も同じ分だけ動く）
+let waveLocked = localStorage.getItem("waveLocked") === "true";
+const WAVE_WINDOW_SECONDS = 20;
+const PLAYHEAD_RATIO = 0.5;
 let sources = [];          // 今鳴らしている音のノード
 let startedAt = 0;         // 通常再生を始めた時刻
 let activeRate = 1;        // 再生開始時の速度
@@ -192,6 +196,7 @@ function updateButtons() {
     playButton.textContent = (isPlaying && !loopMode) ? "⏸ 一時停止" : "▶ 再生";
     loopPlayButton.textContent = (isPlaying && loopMode) ? "■ 再生停止！" : "▶ 再生開始！";
     linkButton.textContent = linked ? "連動：ON" : "連動：OFF";
+    waveLockButton.textContent = waveLocked ? "🔒 波形：ロック中" : "🔓 波形：操作OK";
     for (const t of tracks) {
         const b = t === left ? leftMuteButton : rightMuteButton;
         b.textContent = t.muted ? `🔇 ${t.name}：ミュート中` : `🔊 ${t.name}：音あり`;
@@ -272,6 +277,12 @@ linkButton.addEventListener("click", function() {
     linked = !linked;
     updateButtons();
 });
+
+waveLockButton.addEventListener("click", function() {
+    waveLocked = !waveLocked;
+    localStorage.setItem("waveLocked", waveLocked);
+    updateButtons();
+});
  
 function applyGain(t) {
     t.gain.gain.value = t.muted ? 0 : t.volume;
@@ -330,24 +341,40 @@ function computePeaks(buffer) {
     return peaks;
 }
  
-function drawPin(c, sec, total, w, h, color) {
-    if (sec === null) return;
-    const x = sec / total * w;
+function timeToX(sec, viewStart, viewEnd, w) {
+    return (sec - viewStart) / (viewEnd - viewStart) * w;
+}
+
+function getWaveView(t, total) {
+    const duration = dur(t);
+    if (!duration || !total) return { start: 0, end: duration || 0 };
+
+    const windowSize = Math.min(WAVE_WINDOW_SECONDS, duration);
+    const pos = Math.min(duration, Math.max(0, getPos(t)));
+
+    let start = pos - windowSize * PLAYHEAD_RATIO;
+    start = Math.max(0, Math.min(start, duration - windowSize));
+    return { start, end: start + windowSize };
+}
+
+function drawPin(c, sec, viewStart, viewEnd, w, h, color) {
+    if (sec === null || sec < viewStart || sec > viewEnd) return;
+    const x = timeToX(sec, viewStart, viewEnd, w);
     c.fillStyle = color;
     c.fillRect(x - 1, 0, 2, h);
-    c.beginPath();               // 上のつまみ（▼）
+    c.beginPath();
     c.moveTo(x - 8, 0);
     c.lineTo(x + 8, 0);
     c.lineTo(x, 12);
     c.fill();
 }
- 
+
 function drawWave(t, total) {
     const canvas = t.canvas;
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
-    if (w === 0 || h === 0) return;   // 設定画面で隠れているときは描かない
- 
+    if (w === 0 || h === 0) return;
+
     const dpr = window.devicePixelRatio || 1;
     if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
         canvas.width = Math.round(w * dpr);
@@ -356,7 +383,7 @@ function drawWave(t, total) {
     const c = canvas.getContext("2d");
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
     c.clearRect(0, 0, w, h);
- 
+
     if (!t.peaks || total === 0) {
         c.fillStyle = "#999";
         c.font = "14px sans-serif";
@@ -364,49 +391,62 @@ function drawWave(t, total) {
         c.fillText(`${t.name}音源を選択してください`, w / 2, h / 2 + 5);
         return;
     }
- 
-    // 横軸は左右共通（長い方の音源の長さ＝画面の幅）
-    const waveWidth = w * dur(t) / total;
+
+    const duration = dur(t);
+    const view = getWaveView(t, total);
+    const viewSpan = Math.max(0.001, view.end - view.start);
     const mid = h / 2;
+
+    // 横軸を約20秒に拡大し、再生中は波形が右→左へ流れる
     c.fillStyle = "#4a90d9";
-    for (let x = 0; x < waveWidth; x++) {
-        const i0 = Math.floor(x / waveWidth * PEAK_BINS);
-        const i1 = Math.max(i0 + 1, Math.floor((x + 1) / waveWidth * PEAK_BINS));
+    for (let x = 0; x < w; x++) {
+        const t0 = Math.max(0, view.start + x / w * viewSpan);
+        const t1 = Math.min(duration, view.start + (x + 1) / w * viewSpan);
+        const i0 = Math.max(0, Math.floor(t0 / duration * PEAK_BINS));
+        const i1 = Math.min(PEAK_BINS, Math.max(i0 + 1, Math.ceil(t1 / duration * PEAK_BINS)));
+
         let p = 0;
-        for (let i = i0; i < i1 && i < PEAK_BINS; i++) {
+        for (let i = i0; i < i1; i++) {
             if (t.peaks[i] > p) p = t.peaks[i];
         }
         const amp = Math.max(1, p * mid * 0.95);
         c.fillRect(x, mid - amp, 1, amp * 2);
     }
- 
+
     // ループ設定を開いているときだけ、ピンと範囲を表示
     if (loopOpen) {
         if (t.pinStart !== null || t.pinEnd !== null) {
-            const sx = (t.pinStart ?? 0) / total * w;
-            const ex = (t.pinEnd ?? dur(t)) / total * w;
-            c.fillStyle = "rgba(46,125,50,0.12)";
-            c.fillRect(sx, 0, ex - sx, h);
+            const rs = Math.max(view.start, t.pinStart ?? 0);
+            const re = Math.min(view.end, t.pinEnd ?? duration);
+            if (re > rs) {
+                const sx = timeToX(rs, view.start, view.end, w);
+                const ex = timeToX(re, view.start, view.end, w);
+                c.fillStyle = "rgba(46,125,50,0.12)";
+                c.fillRect(sx, 0, ex - sx, h);
+            }
         }
-        drawPin(c, t.pinStart, total, w, h, "#2e7d32");
-        drawPin(c, t.pinEnd, total, w, h, "#ef6c00");
+        drawPin(c, t.pinStart, view.start, view.end, w, h, "#2e7d32");
+        drawPin(c, t.pinEnd, view.start, view.end, w, h, "#ef6c00");
     }
- 
-    // 再生位置の赤い線
+
+    // 再生位置の赤い線。中央付近を基準に波形が流れる
+    const posX = Math.max(0, Math.min(w, timeToX(getPos(t), view.start, view.end, w)));
     c.fillStyle = "#e53935";
-    c.fillRect(getPos(t) / total * w - 1, 0, 2, h);
+    c.fillRect(posX - 1, 0, 2, h);
 }
- 
+
 // 波形のタップ・ドラッグ
 function setupWave(t) {
     const canvas = t.canvas;
     let drag = null;
- 
+
     const toTime = e => {
         const r = canvas.getBoundingClientRect();
-        return clampTime(t, (e.clientX - r.left) / r.width * totalDuration());
+        const view = getWaveView(t, totalDuration());
+        const ratio = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+        return clampTime(t, view.start + ratio * (view.end - view.start));
     };
- 
+
     // 自分を time に動かす。連動ONなら、もう片方も同じ分だけ動かす
     const moveTo = time => {
         const delta = time - t.offset;
@@ -417,43 +457,48 @@ function setupWave(t) {
             }
         }
     };
- 
+
     canvas.addEventListener("pointerdown", function(e) {
-        if (!t.buffer) return;
+        if (!t.buffer || waveLocked) return;
         const r = canvas.getBoundingClientRect();
         const x = e.clientX - r.left;
         const total = totalDuration();
- 
-        // ループ設定を開いているときは、近くのピンを優先してつかむ
+        const view = getWaveView(t, total);
+
         let key = null;
         let best = 16;
         if (loopOpen) {
             for (const k of ["pinStart", "pinEnd"]) {
-                if (t[k] === null) continue;
-                const d = Math.abs(t[k] / total * r.width - x);
+                if (t[k] === null || t[k] < view.start || t[k] > view.end) continue;
+                const d = Math.abs(timeToX(t[k], view.start, view.end, r.width) - x);
                 if (d < best) { best = d; key = k; }
             }
         }
- 
+
         if (key) {
             drag = { key: key };
         } else {
-            if (loopMode) return;   // ループ再生中は再生位置を動かさない
+            if (loopMode) return;
             drag = { key: null, wasPlaying: isPlaying };
             if (isPlaying) pauseAll();
             moveTo(toTime(e));
         }
         canvas.setPointerCapture(e.pointerId);
     });
- 
+
     canvas.addEventListener("pointermove", function(e) {
-        if (!drag) return;
-        if (drag.key) t[drag.key] = toTime(e);   // 小数秒のまま動かす
-        else moveTo(toTime(e));
+        if (!drag || waveLocked) return;
+        if (drag.key) {
+            t[drag.key] = toTime(e);
+            updatePinInfo();
+        } else {
+            moveTo(toTime(e));
+        }
     });
- 
+
     const end = function() {
-        if (drag && !drag.key && drag.wasPlaying) {
+        if (!drag) return;
+        if (!drag.key && drag.wasPlaying && !waveLocked) {
             startNormal();
             updateButtons();
         }
@@ -462,7 +507,7 @@ function setupWave(t) {
     canvas.addEventListener("pointerup", end);
     canvas.addEventListener("pointercancel", end);
 }
- 
+
 tracks.forEach(setupWave);
  
  

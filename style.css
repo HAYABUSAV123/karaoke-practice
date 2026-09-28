@@ -312,3 +312,31 @@ body.settings-open #settingsPanel {
     border: 0;
     border-top: 1px solid #ddd;
 }
+
+/* ===== 波形操作・スマホ操作 ===== */
+.wave {
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+}
+
+button, input, select {
+    touch-action: manipulation;
+}
+
+.wave-tools {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.wave-tools button {
+    width: 100%;
+}
+
+#waveLockButton {
+    grid-column: 1 / 3;
+}
