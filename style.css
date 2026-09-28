@@ -1,0 +1,289 @@
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    padding: 12px;
+    font-family: sans-serif;
+    background: #f5f5f5;
+    color: #222;
+}
+
+#app {
+    width: 100%;
+    max-width: 600px;
+    min-height: calc(100vh - 24px);
+    margin: 0 auto;
+
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+
+/* ===== タイトル ===== */
+
+h1 {
+    margin: 0 0 24px;
+    font-size: 30px;
+    text-align: center;
+}
+
+
+/* ===== 音源選択 ===== */
+
+.audio-section {
+    width: 100%;
+    margin-bottom: 12px;
+    padding: 14px;
+
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 12px;
+}
+
+.audio-section h2 {
+    margin-top: 0;
+    font-size: 20px;
+}
+
+.audio-section input[type="file"] {
+    width: 100%;
+    margin-top: 8px;
+    font-size: 14px;
+}
+
+
+/* ===== 操作ボタン ===== */
+
+.controls {
+    width: 100%;
+    margin: 15px 0;
+
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+button {
+    min-height: 52px;
+    padding: 10px 12px;
+    font-size: 16px;
+    cursor: pointer;
+}
+
+.controls button {
+    width: 100%;
+    margin: 0;
+}
+
+#syncButton {
+    grid-column: 1 / 3;
+    width: 50%;
+    justify-self: center;
+}
+
+
+/* ===== 時間表示 ===== */
+
+#timeDisplay {
+    margin: 16px 0;
+    padding: 8px 0;
+
+    text-align: center;
+    font-size: 18px;
+    line-height: 1.8;
+}
+
+
+/* ===== シークバー ===== */
+
+.seek-row {
+    width: 100%;
+    margin: 14px 0;
+
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+#seekBar {
+    flex: 1;
+    min-width: 0;
+}
+
+#loopSettingsButton {
+    flex-shrink: 0;
+    padding: 8px 10px;
+    font-size: 14px;
+    white-space: nowrap;
+}
+
+
+/* ===== ループ設定 ===== */
+
+#loopControls {
+    display: none;
+    width: 100%;
+    margin-top: 10px;
+    padding: 15px;
+    text-align: center;
+    background: white;
+    border: 1px solid #ccc;
+    border-radius: 10px;
+}
+
+#loopControls input[type="number"] {
+    width: 70px;
+    margin: 0 15px;
+}
+
+
+/* ===== 音量 ===== */
+
+#loopControls input[type="range"] {
+    max-width: 100%;
+}
+
+
+/* ===== 設定ボタン ===== */
+
+#settingsButton {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+
+    min-width: 60px;
+    min-height: 60px;
+    padding: 8px 12px;
+
+    font-size: 32px;
+}
+
+
+/* ===== 設定パネル ===== */
+
+#settingsPanel {
+    display: none;
+
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+
+    width: min(90vw, 360px);
+    padding: 20px;
+
+    background: white;
+    border: 1px solid #ccc;
+    border-radius: 12px;
+
+    z-index: 100;
+}
+#settingsPanel {
+    padding: 24px 20px 20px;
+}
+#settingsPanel input {
+    width: 70px;
+}
+
+#settingsPanel select {
+    padding: 5px;
+    font-size: 16px;
+}
+
+
+/* ===== スマホ向け細かい調整 ===== */
+
+@media (max-width: 400px) {
+    body {
+        padding: 8px;
+    }
+
+    #app {
+        min-height: calc(100vh - 16px);
+    }
+
+    h1 {
+        font-size: 22px;
+    }
+
+    .audio-section {
+        padding: 12px;
+    }
+
+    .audio-section h2 {
+        font-size: 18px;
+    }
+
+    button {
+        font-size: 15px;
+    }
+
+    #timeDisplay {
+        font-size: 13px;
+    }
+}
+/* ===== 設定パネル内の調整 ===== */
+
+#settingsPanel label {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+
+    margin-bottom: 24px;
+}
+
+#settingsPanel input[type="number"] {
+    width: 70px;
+}
+
+#settingsPanel select {
+    padding: 5px;
+    font-size: 16px;
+}
+
+
+/* ===== 音量設定 ===== */
+
+.volume-control {
+    width: 100%;
+    margin: 24px 0;
+    text-align: center;
+}
+
+.volume-control label {
+    display: block;
+    margin-bottom: 10px;
+}
+
+.volume-control input[type="range"] {
+    display: block;
+    width: 100%;
+    margin: 0 0 12px;
+}
+#settingsPanel input[type="range"] {
+    width: 100%;
+}
+.volume-control button {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+
+    padding: 0;
+    margin: 0 4px;
+
+    font-size: 20px;
+}
+
+
+/* ===== 設定項目の区切り ===== */
+
+#settingsPanel hr {
+    margin: 20px 0;
+    border: 0;
+    border-top: 1px solid #ddd;
+}
