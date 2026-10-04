@@ -11,6 +11,15 @@
 <div id="app">
     <h1>カラオケ練習ツール</h1>
 
+    <!-- 出し入れするボタン（押すと開閉） -->
+    <div class="top-tools">
+        <button id="fileToggleButton">📁 ファイル選択</button>
+        <button id="detailToggleButton">⚙ 詳細操作</button>
+        <button id="viewToggleButton">🎵 音程へ</button>
+    </div>
+
+    <!-- ファイル選択（押すとにゅっと出る・仕舞える） -->
+    <div id="fileSection" class="collapsible open">
     <div class="audio-section">
         <h2>左耳から出る音源を選択してください</h2>
         <input type="file" id="leftFile" accept="audio/*,video/*,.m4a,.mp3,.wav,.aac,.mov,.mp4">
@@ -21,13 +30,10 @@
         <input type="file" id="rightFile" accept="audio/*,video/*,.m4a,.mp3,.wav,.aac,.mov,.mp4">
     </div>
 
-    <!-- 時間表示 -->
-    <div id="timeDisplay">左 0:00 / 0:00　右 0:00 / 0:00</div>
+    </div>
 
-    <!-- 波形（タップ・ドラッグで位置を動かす） -->
-    <div class="wave-section">
-        <canvas id="leftWave" class="wave"></canvas>
-        <canvas id="rightWave" class="wave"></canvas>
+    <!-- 詳細操作（押すとにゅっと出る・仕舞える） -->
+    <div id="detailPanel" class="collapsible">
         <div class="wave-tools">
             <button id="leftMuteButton">🔊 左：音あり</button>
             <button id="rightMuteButton">🔊 右：音あり</button>
@@ -35,6 +41,20 @@
             <button id="rightWaveLockButton">🔓 右波形：操作OK</button>
             <button id="linkButton">連動：ON</button>
         </div>
+    </div>
+
+    <!-- 時間表示 -->
+    <div id="timeDisplay">左 0:00 / 0:00　右 0:00 / 0:00</div>
+
+    <!-- 波形（タップ・ドラッグで位置を動かす） -->
+    <div class="wave-section">
+        <div id="graphArea" class="graph-area">
+            <canvas id="leftWave" class="wave"></canvas>
+            <canvas id="rightWave" class="wave"></canvas>
+            <!-- 音程表示（波形の上に重ねて、フェードで切り替える） -->
+            <canvas id="pitchCanvas"></canvas>
+        </div>
+        <div id="pitchStatus"></div>
     </div>
 
     <div class="seek-row">
@@ -118,7 +138,7 @@
     <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
     <script>eruda.init();</script>
 
-    <script src="script.js?v=5"></script>
+    <script src="script.js?v=6"></script>
 </div>
 </body>
 </html>

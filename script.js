@@ -26,6 +26,7 @@ function createTrack(outputIndex, canvasId) {
         name: outputIndex === 0 ? "左" : "右",
         buffer: null,
         peaks: null,
+        pitch: null,          // 音程の解析結果
         gain: gain,
         canvas: document.getElementById(canvasId),
         offset: 0,            // 停止中の再生位置（秒）
@@ -57,12 +58,16 @@ const loopPlayButton = $("loopPlayButton"), pinInfo = $("pinInfo");
 const settingsButton = $("settingsButton");
 const skipTime = $("skipTime"), volumeStep = $("volumeStep"), playbackRate = $("playbackRate"), waveWindow = $("waveWindow");
 const leftVolume = $("leftVolume"), rightVolume = $("rightVolume");
+const fileToggleButton = $("fileToggleButton"), detailToggleButton = $("detailToggleButton"), viewToggleButton = $("viewToggleButton");
+const fileSection = $("fileSection"), detailPanel = $("detailPanel");
+const graphArea = $("graphArea"), pitchCanvas = $("pitchCanvas"), pitchStatus = $("pitchStatus");
  
  
 // ===== 状態 =====
 let isPlaying = false;
 let loopMode = false;      // 周回ループ中か
 let loopOpen = false;      // ループ設定を開いているか
+let pitchMode = false;     // 音程表示中か（false=波形）
 let linked = true;         // 連動ON（片方を動かすともう片方も同じ分だけ動く）
 let leftWaveLocked = localStorage.getItem("leftWaveLocked") === "true";
 let rightWaveLocked = localStorage.getItem("rightWaveLocked") === "true";
@@ -200,6 +205,10 @@ function updateButtons() {
     playButton.textContent = (isPlaying && !loopMode) ? "⏸ 一時停止" : "▶ 再生";
     loopPlayButton.textContent = (isPlaying && loopMode) ? "■ 再生停止！" : "▶ 再生開始！";
     linkButton.textContent = linked ? "連動：ON" : "連動：OFF";
+    // 左右とも波形をロックしている間は、再生・停止・スキップなどを押せなくする
+    const allLocked = leftWaveLocked && rightWaveLocked;
+    for (const b of [playButton, stopButton, backButton, forwardButton, syncButton, loopPlayButton]) b.disabled = allLocked;
+    viewToggleButton.textContent = pitchMode ? "📊 波形へ" : "🎵 音程へ";
     leftWaveLockButton.textContent = leftWaveLocked ? "🔒 左波形：ロック中" : "🔓 左波形：操作OK";
     rightWaveLockButton.textContent = rightWaveLocked ? "🔒 右波形：ロック中" : "🔓 右波形：操作OK";
     for (const t of tracks) {
@@ -286,12 +295,14 @@ linkButton.addEventListener("click", function() {
 leftWaveLockButton.addEventListener("click", function() {
     leftWaveLocked = !leftWaveLocked;
     localStorage.setItem("leftWaveLocked", leftWaveLocked);
+    if (leftWaveLocked && rightWaveLocked && isPlaying) pauseAll();   // ロックしたら再生も止める
     updateButtons();
 });
 
 rightWaveLockButton.addEventListener("click", function() {
     rightWaveLocked = !rightWaveLocked;
     localStorage.setItem("rightWaveLocked", rightWaveLocked);
+    if (leftWaveLocked && rightWaveLocked && isPlaying) pauseAll();   // ロックしたら再生も止める
     updateButtons();
 });
  
@@ -580,6 +591,200 @@ function updatePinInfo() {
 }
  
  
+// ===== 音程（ピッチ）の解析と表示 =====
+const PITCH_LOW = 80, PITCH_HIGH = 1000;   // 検出する声の高さの範囲（Hz）
+const PITCH_HOP = 0.03;                    // 解析の間隔（秒）
+const NOTE_NAMES = { 0: "ド", 2: "レ", 4: "ミ", 5: "ファ", 7: "ソ", 9: "ラ", 11: "シ" };
+let pitchMin = 48, pitchMax = 72;          // 縦軸の範囲（MIDIノート番号）
+
+const freqToMidi = f => 69 + 12 * Math.log2(f / 440);
+
+// YIN法：1フレーム分の声の高さ(Hz)を求める。見つからなければ null
+function yinPitch(x, start, W, tauMin, tauMax, rate) {
+    const d = new Float32Array(tauMax + 1);
+    for (let tau = 1; tau <= tauMax; tau++) {
+        let sum = 0;
+        for (let i = 0; i < W; i++) {
+            const diff = x[start + i] - x[start + i + tau];
+            sum += diff * diff;
+        }
+        d[tau] = sum;
+    }
+    // 累積平均で正規化
+    let running = 0;
+    d[0] = 1;
+    for (let tau = 1; tau <= tauMax; tau++) {
+        running += d[tau];
+        d[tau] = running === 0 ? 1 : d[tau] * tau / running;
+    }
+    for (let tau = tauMin; tau < tauMax; tau++) {
+        if (d[tau] < 0.15) {
+            while (tau + 1 < tauMax && d[tau + 1] < d[tau]) tau++;
+            const a = d[tau - 1], b = d[tau], c = d[tau + 1];
+            const denom = a - 2 * b + c;
+            const shift = denom !== 0 ? (a - c) / (2 * denom) : 0;   // 放物線で細かく補間
+            return rate / (tau + shift);
+        }
+    }
+    return null;
+}
+
+// 音源全体の音程を解析して t.pitch に入れる
+async function analyzePitch(t) {
+    const buf = t.buffer;
+    // 全チャンネルを平均して、約22kHzに間引く（計算を軽くするため）
+    const step = Math.max(1, Math.round(buf.sampleRate / 22050));
+    const rate = buf.sampleRate / step;
+    const n = Math.floor(buf.length / step);
+    const x = new Float32Array(n);
+    for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+        const data = buf.getChannelData(ch);
+        for (let i = 0; i < n; i++) {
+            let sum = 0;
+            for (let k = 0; k < step; k++) sum += data[i * step + k];
+            x[i] += sum / step / buf.numberOfChannels;
+        }
+    }
+
+    const W = Math.round(rate * 0.025);
+    const tauMin = Math.floor(rate / PITCH_HIGH);
+    const tauMax = Math.ceil(rate / PITCH_LOW);
+    const hop = Math.round(rate * PITCH_HOP);
+    const frames = Math.max(0, Math.floor((n - W - tauMax - 1) / hop));
+    const midi = new Float32Array(frames);
+    const level = new Float32Array(frames);   // 音量(dB)。音量表示用に取っておく
+
+    for (let f = 0; f < frames; f++) {
+        const start = f * hop;
+        let e = 0;
+        for (let i = 0; i < W; i++) e += x[start + i] * x[start + i];
+        level[f] = 10 * Math.log10(e / W + 1e-12);
+        const hz = level[f] > -50 ? yinPitch(x, start, W, tauMin, tauMax, rate) : null;
+        midi[f] = hz ? freqToMidi(hz) : NaN;
+        if (f % 150 === 0) {
+            pitchStatus.textContent = `${t.name}音源の音程を解析中… ${Math.round(f / frames * 100)}%`;
+            await new Promise(r => setTimeout(r, 0));   // 画面が固まらないよう一息入れる
+        }
+    }
+
+    // 前後5フレームの中央値で、ぶれを取りながら半音に丸める
+    const note = new Float32Array(frames).fill(NaN);
+    for (let f = 0; f < frames; f++) {
+        const v = [];
+        for (let j = Math.max(0, f - 2); j <= Math.min(frames - 1, f + 2); j++) {
+            if (!Number.isNaN(midi[j])) v.push(midi[j]);
+        }
+        if (v.length >= 3) {
+            v.sort((a, b) => a - b);
+            note[f] = Math.round(v[v.length >> 1]);
+        }
+    }
+
+    // 同じ音が続くところを1本のバーにまとめる（2フレーム未満は捨てる）
+    const bars = [];
+    let a = 0;
+    for (let f = 1; f <= frames; f++) {
+        if (f === frames || note[f] !== note[a] || Number.isNaN(note[a])) {
+            if (!Number.isNaN(note[a]) && f - a >= 2) bars.push({ a: a, b: f, n: note[a] });
+            a = f;
+        }
+    }
+
+    t.pitch = { midi: midi, level: level, bars: bars, hopSec: hop / rate, t0: (W / 2) / rate };
+}
+
+// 縦軸の範囲を、左右の音源のバーから決める（外れ値は除く）
+function updatePitchRange() {
+    const all = [];
+    for (const t of tracks) if (t.pitch) for (const b of t.pitch.bars) all.push(b.n);
+    if (all.length === 0) return;
+    all.sort((p, q) => p - q);
+    const lo = all[Math.floor(all.length * 0.02)];
+    const hi = all[Math.floor(all.length * 0.98)];
+    pitchMin = Math.floor(lo) - 2;
+    pitchMax = Math.ceil(hi) + 2;
+    if (pitchMax - pitchMin < 12) pitchMax = pitchMin + 12;
+}
+
+// 音程グラフを描く（左=青、右=オレンジ。音量OFFの側は描かない）
+function drawPitch(total) {
+    const canvas = pitchCanvas;
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    if (w === 0 || h === 0) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+        canvas.width = Math.round(w * dpr);
+        canvas.height = Math.round(h * dpr);
+    }
+    const c = canvas.getContext("2d");
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, w, h);
+
+    // 縦軸は上が高い音。ド・レ・ミの線を薄く引く
+    const top = pitchMax + 0.5, bottom = pitchMin - 0.5;
+    const yOf = m => (top - m) / (top - bottom) * h;
+    const rowH = h / (top - bottom);
+    c.font = "9px sans-serif";
+    c.textAlign = "left";
+    for (let m = pitchMin; m <= pitchMax; m++) {
+        const name = NOTE_NAMES[((m % 12) + 12) % 12];
+        if (!name) continue;
+        const y = yOf(m);
+        c.fillStyle = m % 12 === 0 ? "#ccc" : "#eee";
+        c.fillRect(0, y - 0.5, w, 1);
+        if (rowH >= 4.5 || m % 12 === 0) {
+            c.fillStyle = "#aaa";
+            c.fillText(name, 2, y - 2);
+        }
+    }
+
+    if (!tracks.some(t => t.pitch)) {
+        c.fillStyle = "#999";
+        c.font = "14px sans-serif";
+        c.textAlign = "center";
+        c.fillText("音源を選ぶと音程を解析します", w / 2, h / 2 + 5);
+    }
+
+    const colors = [["#4a90d9", "rgba(74,144,217,0.35)"], ["#ef8a2d", "rgba(239,138,45,0.35)"]];
+    tracks.forEach(function(t, idx) {
+        if (!t.pitch || t.muted) return;
+        const p = t.pitch;
+        const view = getWaveView(t, total);
+
+        // 実際の音程の細かい動きを、薄い線で重ねる
+        const f0 = Math.max(0, Math.floor((view.start - p.t0) / p.hopSec) - 1);
+        const f1 = Math.min(p.midi.length - 1, Math.ceil((view.end - p.t0) / p.hopSec) + 1);
+        c.strokeStyle = colors[idx][1];
+        c.lineWidth = 1;
+        c.beginPath();
+        let pen = false;
+        for (let f = f0; f <= f1; f++) {
+            if (Number.isNaN(p.midi[f])) { pen = false; continue; }
+            const x = timeToX(f * p.hopSec + p.t0, view.start, view.end, w);
+            const y = yOf(p.midi[f]);
+            if (pen) c.lineTo(x, y); else c.moveTo(x, y);
+            pen = true;
+        }
+        c.stroke();
+
+        // 半音に丸めたバー（同じ音が続けば、ーーーのように長くなる）
+        c.fillStyle = colors[idx][0];
+        for (const b of p.bars) {
+            if (b.b < f0 || b.a > f1) continue;
+            const x0 = timeToX(b.a * p.hopSec + p.t0, view.start, view.end, w);
+            const x1 = timeToX(b.b * p.hopSec + p.t0, view.start, view.end, w);
+            c.fillRect(x0, yOf(b.n) - 3, Math.max(2, x1 - x0 - 1), 6);
+        }
+    });
+
+    // 赤い再生位置は波形と同じく中央に固定
+    c.fillStyle = "#e53935";
+    c.fillRect(w * PLAYHEAD_RATIO - 1, 0, 2, h);
+}
+
+
 // ===== 画面の更新 =====
 function updateUI() {
     // 最後まで再生したら先頭に戻して停止
@@ -594,6 +799,7 @@ function updateUI() {
     const total = totalDuration();
     drawWave(left, total);
     drawWave(right, total);
+    drawPitch(total);
     updatePinInfo();
 }
  
@@ -618,6 +824,7 @@ async function loadFile(input, t) {
     stopAll();
     t.pinStart = null;
     t.pinEnd = null;
+    t.pitch = null;
     console.log(`${t.name}音源:`, file.name, file.type, file.size);
     timeDisplay.textContent = `${t.name}音源を読み込み中…`;
  
@@ -631,6 +838,18 @@ async function loadFile(input, t) {
         t.peaks = null;
         console.error(`${t.name}音源の読み込みエラー:`, e);
         alert(`${t.name}音源を読み込めませんでした。別の形式（m4a / mp3 など）で試してください。`);
+    }
+
+    // 読み込めたら、音程も解析しておく（失敗しても再生には影響しない）
+    if (t.buffer) {
+        try {
+            await analyzePitch(t);
+            updatePitchRange();
+        } catch (e) {
+            console.error(`${t.name}音源の音程解析エラー:`, e);
+            t.pitch = null;
+        }
+        pitchStatus.textContent = "";
     }
 }
  
@@ -699,3 +918,13 @@ bindVolume(rightVolume, $("rightVolumeDown"), $("rightVolumeUp"), right, "rightV
 updateSkipButtonText();
 updateButtons();
 updateUI();
+
+// ===== 出し入れするボタン（ファイル選択・詳細操作・表示切り替え） =====
+fileToggleButton.addEventListener("click", () => fileSection.classList.toggle("open"));
+detailToggleButton.addEventListener("click", () => detailPanel.classList.toggle("open"));
+
+viewToggleButton.addEventListener("click", function() {
+    pitchMode = !pitchMode;
+    graphArea.classList.toggle("pitch-mode", pitchMode);
+    updateButtons();
+});

@@ -341,3 +341,73 @@ button, input, select {
 #rightWaveLockButton {
     width: 100%;
 }
+
+
+/* ===== 出し入れするボタン ===== */
+.top-tools {
+    width: 100%;
+    margin-bottom: 12px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+}
+
+.top-tools button {
+    width: 100%;
+    padding: 8px 4px;
+    font-size: 14px;
+}
+
+/* ボタンを押すと、にゅっと出てくる */
+.collapsible {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+}
+
+.collapsible.open {
+    max-height: 700px;
+}
+
+
+/* ===== 音程表示（波形の上に重ねる） ===== */
+.graph-area {
+    position: relative;
+}
+
+#pitchCanvas {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: calc(100% - 8px);
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    opacity: 0;
+    pointer-events: none;   /* 波形側でドラッグ操作を受ける */
+    transition: opacity 0.3s;
+}
+
+.graph-area .wave {
+    transition: opacity 0.3s;
+}
+
+.graph-area.pitch-mode #pitchCanvas {
+    opacity: 1;
+}
+
+.graph-area.pitch-mode .wave {
+    opacity: 0;
+}
+
+#pitchStatus {
+    font-size: 12px;
+    color: #666;
+    text-align: center;
+}
+
+button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
