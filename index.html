@@ -22,11 +22,13 @@
     <div id="fileSection" class="collapsible open">
     <div class="audio-section">
         <h2>左耳から出る音源を選択してください</h2>
+        <div class="bar-color">音程バーの色：<span class="chip" style="background:#4a90d9"></span>青</div>
         <input type="file" id="leftFile" accept="audio/*,video/*,.m4a,.mp3,.wav,.aac,.mov,.mp4">
     </div>
 
     <div class="audio-section">
         <h2>右耳から出る音源を選択してください</h2>
+        <div class="bar-color">音程バーの色：<span class="chip" style="background:#ef8a2d"></span>オレンジ</div>
         <input type="file" id="rightFile" accept="audio/*,video/*,.m4a,.mp3,.wav,.aac,.mov,.mp4">
     </div>
 
@@ -55,6 +57,10 @@
             <canvas id="pitchCanvas"></canvas>
         </div>
         <div id="pitchStatus"></div>
+        <div class="pitch-legend">音程バー：左=青　右=オレンジ　<span class="chip" style="background:#2e9e5b"></span>左右が同じ音で重なった所　<span class="chip" style="background:#c2185b"></span>一番大きい声　<span class="chip" style="background:#263238"></span>一番小さい声</div>
+        <div class="pitch-legend">バー上の記号：↗ しゃくり（下から上がる）　〜 ビブラート（細かく揺れる）　↘ フォール（語尾が下がる）</div>
+        <!-- 音量の統計と、タップした音の詳細（音程表示のあいだだけ表示） -->
+        <div id="volumeInfo" class="volume-info"></div>
     </div>
 
     <div class="seek-row">
@@ -83,7 +89,7 @@
         <button id="syncButton">同期🔄</button>
     </div>
 
-    <button id="settingsButton">⚙</button>
+    <button id="settingsButton">詳細数字設定⚙</button>
 
     <div id="settingsPanel">
         <label>
@@ -138,7 +144,7 @@
     <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
     <script>eruda.init();</script>
 
-    <script src="script.js?v=6"></script>
+    <script src="script.js?v=9"></script>
 </div>
 </body>
 </html>
